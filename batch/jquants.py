@@ -9,10 +9,13 @@ J-Quants V2 APIクライアント（オニール分析システム用）
   カラム名はV2略称をフォールバックリストで吸収）。
 
 エンドポイント:
-  GET /v2/equities/master                       上場銘柄一覧（銘柄名・業種・市場）
-  GET /v2/prices/daily_quotes?date=YYYY-MM-DD   日次株価四本値（指定日・全銘柄）
-  GET /v2/fins/summary?date=YYYY-MM-DD          財務サマリー（指定日開示・全銘柄）
-  GET /v2/indices/topix?from=&to=               TOPIX指数の日次OHLC
+  GET /v2/equities/master                        上場銘柄一覧（銘柄名・業種・市場）
+  GET /v2/equities/bars/daily?date=YYYY-MM-DD    日次株価四本値（指定日・全銘柄。code= も可）
+  GET /v2/fins/summary?date=YYYY-MM-DD           財務サマリー（指定日開示・全銘柄）
+  GET /v2/indices/bars/daily/topix?from=&to=     TOPIX指数の日次OHLC
+
+  ※ V2では daily_quotes は /equities/bars/daily、TOPIXは /indices/bars/daily/topix に変更
+    （旧 /prices/daily_quotes・/indices/topix はV2では 403「endpoint does not exist」になる）。
 """
 
 from __future__ import annotations
@@ -105,8 +108,9 @@ def fetch_equities_master() -> list[dict]:
 
 
 def fetch_daily_quotes(date_str: str) -> list[dict]:
-    """指定日(YYYY-MM-DD)の全銘柄の株価四本値。V2略称: Date, Code, AdjO/H/L/C, AdjVo, Va。"""
-    return _paginate("/prices/daily_quotes", {"date": date_str})
+    """指定日(YYYY-MM-DD)の全銘柄の株価四本値。V2: /equities/bars/daily。
+    略称: Date, Code, O/H/L/C, Vo, Va, AdjFactor, AdjO/AdjH/AdjL/AdjC/AdjVo。"""
+    return _paginate("/equities/bars/daily", {"date": date_str})
 
 
 def fetch_fins_summary(date_str: str) -> list[dict]:
@@ -117,14 +121,14 @@ def fetch_fins_summary(date_str: str) -> list[dict]:
 
 
 def fetch_topix(from_date: str | None = None, to_date: str | None = None) -> list[dict]:
-    """TOPIX指数の日次OHLC。V2略称: Date, O, H, L, C（出来高は無い場合あり）。"""
+    """TOPIX指数の日次OHLC。V2: /indices/bars/daily/topix。略称: Date, O, H, L, C（出来高なし）。"""
     params: dict = {}
     if from_date:
         params["from"] = from_date
     if to_date:
         params["to"] = to_date
     # レスポンス本体キーは "data"（念のため "topix" もフォールバック）
-    return _paginate("/indices/topix", params, data_keys=("data", "topix"))
+    return _paginate("/indices/bars/daily/topix", params, data_keys=("data", "topix"))
 
 
 # ---------------------------------------------------------------------------

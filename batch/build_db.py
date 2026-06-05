@@ -145,15 +145,15 @@ def ingest_prices_for_date(conn, date_str: str, valid: set[str]) -> float:
         code = str(jq.pick(r, "Code", "code", default=""))
         if code not in valid:
             continue
-        close = jq.to_float(jq.pick(r, "AdjC", "AdjustmentClose", "Close"))
+        close = jq.to_float(jq.pick(r, "AdjC", "C", "AdjustmentClose", "Close"))
         if close is None:
             continue
-        vol = jq.to_float(jq.pick(r, "AdjVo", "AdjustmentVolume", "Volume")) or 0.0
+        vol = jq.to_float(jq.pick(r, "AdjVo", "Vo", "AdjustmentVolume", "Volume")) or 0.0
         recs.append((
             code, date_str,
-            jq.to_float(jq.pick(r, "AdjO", "AdjustmentOpen", "Open")),
-            jq.to_float(jq.pick(r, "AdjH", "AdjustmentHigh", "High")),
-            jq.to_float(jq.pick(r, "AdjL", "AdjustmentLow", "Low")),
+            jq.to_float(jq.pick(r, "AdjO", "O", "AdjustmentOpen", "Open")),
+            jq.to_float(jq.pick(r, "AdjH", "H", "AdjustmentHigh", "High")),
+            jq.to_float(jq.pick(r, "AdjL", "L", "AdjustmentLow", "Low")),
             close, vol,
         ))
         total_vol += vol
