@@ -138,6 +138,17 @@ def test_weighted_perf_positive_for_uptrend():
 
 # ---- 横断: finalize ----
 
+def test_compute_stock_metrics_keys_present_even_with_short_history():
+    # 価格履歴が60日未満でも、価格系の列は必ず存在する（DataFrame列欠落でto_sqlが落ちないこと）
+    stmts = [mk("FY", "2025-03-31", "2025-03-31", eps=10, np_=100, eq=1000, ta=2000, shares=1000)]
+    close = np.array([100.0, 101, 102, 103, 104])  # <60
+    vol = np.array([1.0, 1, 1, 1, 1])
+    m = compute_stock_metrics(stmts, close, vol)
+    for k in ("last_close", "ma200", "high_52w", "pct_from_high", "vol_ratio",
+              "weighted_perf", "market_cap", "roe", "equity_ratio"):
+        assert k in m, f"key {k} missing"
+
+
 def test_finalize_rs_rating_and_pass():
     # 3銘柄: weighted_perf 大きいほど rs_rating 高い
     rows = [

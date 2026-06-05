@@ -261,10 +261,11 @@ def compute_stock_metrics(stmts: list[Stmt], close: np.ndarray, volume: np.ndarr
     shares_net = next((s.shares_net for s in sorted(
         stmts, key=lambda s: (s.disclosed or ""), reverse=True) if s.shares_net), None)
 
-    feats = price_features(close, volume)
+    feats = price_features(close, volume)  # 履歴不足なら {} を返す
     last_close = feats.get("last_close")
     market_cap = (shares_net * last_close) if (shares_net and last_close) else None
 
+    # 価格系のキーは履歴不足でも必ず含める（DataFrameの列欠落を防ぐ）
     return {
         "q0_eps_yoy": q0_eps,
         "q1_eps_yoy": q1_eps,
@@ -276,7 +277,11 @@ def compute_stock_metrics(stmts: list[Stmt], close: np.ndarray, volume: np.ndarr
         "shares_net": shares_net,
         "market_cap": market_cap,
         "weighted_perf": weighted_perf(close),
-        **feats,
+        "last_close": feats.get("last_close"),
+        "ma200": feats.get("ma200"),
+        "high_52w": feats.get("high_52w"),
+        "pct_from_high": feats.get("pct_from_high"),
+        "vol_ratio": feats.get("vol_ratio"),
     }
 
 
