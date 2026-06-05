@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>O'Neil 成長株アナライザー</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --line:#e5e7eb; --ink:#1f2937; --sub:#6b7280;
+          --accent:#2563eb; --pass:#ecfdf5; --bad:#9ca3af; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI","Hiragino Kaku Gothic ProN",Meiryo,sans-serif;
+         background:var(--bg); color:var(--ink); }
+  header { background:var(--card); border-bottom:1px solid var(--line); padding:10px 16px;
+           display:flex; align-items:center; gap:14px; position:sticky; top:0; z-index:20; }
+  header h1 { font-size:18px; margin:0; color:var(--accent); font-weight:700; }
+  header .sp { flex:1; }
+  header input { border:1px solid var(--line); border-radius:6px; padding:6px 8px; width:120px; }
+  header button { border:1px solid var(--accent); background:var(--accent); color:#fff;
+                  border-radius:6px; padding:6px 12px; cursor:pointer; }
+  .wrap { display:flex; align-items:flex-start; }
+  aside { width:230px; min-width:230px; padding:14px; }
+  aside h2 { font-size:13px; color:var(--sub); margin:16px 0 6px; letter-spacing:.04em; }
+  aside .grp { background:var(--card); border:1px solid var(--line); border-radius:8px;
+               padding:10px; margin-bottom:10px; }
+  aside label { display:block; font-size:11px; color:var(--sub); margin:6px 0 2px; }
+  aside input, aside select { width:100%; border:1px solid var(--line); border-radius:6px; padding:5px; }
+  .row2 { display:flex; gap:8px; } .row2 > div { flex:1; }
+  main { flex:1; padding:14px 18px; }
+  .status { font-size:12px; color:var(--sub); margin-bottom:8px; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border-radius:8px; overflow:hidden;
+          box-shadow:0 1px 2px rgba(0,0,0,.04); font-size:13px; }
+  th,td { padding:9px 10px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { background:#fafbfc; color:var(--sub); font-weight:600; position:sticky; top:52px; }
+  td.l, th.l { text-align:left; }
+  tbody tr { cursor:pointer; } tbody tr:hover { background:#f0f6ff; }
+  .pill { font-weight:700; color:var(--accent); }
+  .muted { color:var(--bad); }
+  /* detail */
+  #detail { display:none; }
+  .back { color:var(--accent); cursor:pointer; font-size:13px; }
+  .dh { display:flex; align-items:baseline; gap:12px; margin:6px 0 12px; }
+  .dh h2 { margin:0; font-size:26px; } .dh .code { color:var(--sub); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:10px 0 18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .card .k { font-size:11px; color:var(--sub); } .card .v { font-size:22px; font-weight:700; }
+  .chart { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px; margin-bottom:12px; }
+  .chart h3 { margin:2px 6px 8px; font-size:13px; color:var(--sub); font-weight:600; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media(max-width:760px){ aside{display:none;} .grid2{grid-template-columns:1fr;} }
+  .filebar { font-size:12px; color:var(--sub); }
+  .filebar input { font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>O'Neil 成長株アナライザー</h1>
+  <span class="sp"></span>
+  <input id="search" placeholder="証券コード…" />
+  <button id="searchBtn">検索</button>
+  <button id="recalcBtn">再計算</button>
+</header>
+
+<div class="wrap">
+  <aside>
+    <h2>データベース</h2>
+    <div class="grp filebar">
+      <div id="dbStatus">読み込み中…</div>
+      <label>ローカルDBを指定 (oneil.db / .gz)</label>
+      <input type="file" id="dbFile" accept=".db,.sqlite,.gz" />
+    </div>
+
+    <h2>基本設定</h2>
+    <div class="grp">
+      <label>基準日 (asof)</label>
+      <input id="asof" readonly />
+      <label>ランキング表示件数</label>
+      <input id="topn" type="number" value="50" />
+    </div>
+
+    <h2>スクリーニング閾値 (%)</h2>
+    <div class="grp">
+      <div class="row2">
+        <div><label>Q0 EPS%</label><input id="th_q0_eps" type="number" value="25" /></div>
+        <div><label>Q1 EPS%</label><input id="th_q1_eps" type="number" value="25" /></div>
+      </div>
+      <div class="row2">
+        <div><label>Q0 売上%</label><input id="th_q0_sales" type="number" value="25" /></div>
+        <div><label>年間EPS%</label><input id="th_annual_eps" type="number" value="25" /></div>
+      </div>
+      <div class="row2">
+        <div><label>ROE%</label><input id="th_roe" type="number" value="17" /></div>
+        <div><label>RS</label><input id="th_rs" type="number" value="85" /></div>
+      </div>
+    </div>
+
+    <h2>ランキングウェイト</h2>
+    <div class="grp">
+      <div class="row2">
+        <div><label>Q0</label><input id="w_q0" type="number" step="0.1" value="0.5" /></div>
+        <div><label>Q1</label><input id="w_q1" type="number" step="0.1" value="0.3" /></div>
+        <div><label>2Y</label><input id="w_2y" type="number" step="0.1" value="0.2" /></div>
+      </div>
+    </div>
+    <div class="grp filebar">
+      <a href="market.html">→ マーケット天井検出ページ</a>
+    </div>
+  </aside>
+
+  <main>
+    <!-- ランキング -->
+    <div id="ranking">
+      <div class="status" id="rankStatus"></div>
+      <table id="rankTable">
+        <thead><tr>
+          <th>順位</th><th class="l">コード</th><th class="l">企業名</th>
+          <th>SCORE</th><th>Q0 EPS%</th><th>Q1 EPS%</th><th>2Y CAGR%</th>
+          <th>Y0 EPS%</th><th>ROE%</th><th>RS</th><th>自己資本%</th><th>時価総額(億)</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- 詳細 -->
+    <div id="detail">
+      <span class="back" id="back">← ランキングに戻る</span>
+      <div class="dh"><h2 id="dName"></h2><span class="code" id="dCode"></span></div>
+      <div class="chart"><h3>株価（日足）＋決算マーカー</h3><div id="priceChart" style="height:360px;"></div></div>
+      <div class="cards" id="cards"></div>
+      <h3 style="color:var(--sub);font-size:14px;">財務データ</h3>
+      <div class="chart"><h3>ROE (通期, %)</h3><div id="cRoe" style="height:160px;"></div></div>
+      <div class="grid2">
+        <div class="chart"><h3>四半期 EPS</h3><div id="cQeps" style="height:160px;"></div></div>
+        <div class="chart"><h3>四半期 EPS YoY (%)</h3><div id="cQepsYoy" style="height:160px;"></div></div>
+        <div class="chart"><h3>通期 EPS</h3><div id="cAeps" style="height:160px;"></div></div>
+        <div class="chart"><h3>通期 EPS YoY (%)</h3><div id="cAepsYoy" style="height:160px;"></div></div>
+        <div class="chart"><h3>四半期 売上</h3><div id="cQsales" style="height:160px;"></div></div>
+        <div class="chart"><h3>四半期 売上 YoY (%)</h3><div id="cQsalesYoy" style="height:160px;"></div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="./vendor/sql-wasm.js"></script>
+<script src="./vendor/lightweight-charts.js"></script>
+<script>
+// ===== グローバル =====
+let DB = null;          // sql.js Database
+let METRICS = [];       // metricsテーブル全行
+const $ = (id) => document.getElementById(id);
+
+// ===== DB ロード =====
+async function initSql() {
+  return await initSqlJs({ locateFile: f => `./vendor/${f}` });
+}
+async function gunzip(buf) {
+  if ('DecompressionStream' in window) {
+    const ds = new DecompressionStream('gzip');
+    const stream = new Response(buf).body.pipeThrough(ds);
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  throw new Error('DecompressionStream未対応のブラウザです');
+}
+async function loadFromBytes(bytes, isGz) {
+  const SQL = await initSql();
+  const data = isGz ? await gunzip(bytes) : bytes;
+  DB = new SQL.Database(data);
+  afterLoad();
+}
+async function autoLoad() {
+  try {
+    const r = await fetch('oneil.db.gz', { cache: 'no-cache' });
+    if (!r.ok) throw new Error('not found');
+    const buf = await r.arrayBuffer();
+    await loadFromBytes(new Uint8Array(buf), true);
+  } catch (e) {
+    $('dbStatus').innerHTML = 'oneil.db.gz を自動取得できませんでした。<br>下の入力からローカルDBを指定してください。';
+  }
+}
+$('dbFile').addEventListener('change', async (ev) => {
+  const f = ev.target.files[0]; if (!f) return;
+  const buf = new Uint8Array(await f.arrayBuffer());
+  await loadFromBytes(buf, f.name.endsWith('.gz'));
+});
+
+function query(sql, params) {
+  const res = []; const st = DB.prepare(sql);
+  if (params) st.bind(params);
+  while (st.step()) res.push(st.getAsObject());
+  st.free(); return res;
+}
+
+function afterLoad() {
+  const meta = {}; query("SELECT key,value FROM meta").forEach(r => meta[r.key] = r.value);
+  $('asof').value = meta['asof'] || '';
+  $('dbStatus').innerHTML = `読み込み完了 ✓<br>基準日: ${meta['asof']||'-'}　更新: ${(meta['updated_at']||'').slice(0,16)}`;
+  METRICS = query("SELECT * FROM metrics");
+  renderRanking();
+  // 通知メールのリンク (?code=XXXX) から銘柄詳細へ直接ジャンプ
+  const dl = new URLSearchParams(location.search).get('code');
+  if (dl) { const m = METRICS.find(r => r.code4 === dl || r.code === dl); if (m) showDetail(m.code); }
+}
+
+// ===== ランキング（ブラウザ内で閾値・重みを再適用） =====
+function cfg() {
+  const num = id => parseFloat($(id).value);
+  return { th_q0_eps:num('th_q0_eps'), th_q1_eps:num('th_q1_eps'), th_q0_sales:num('th_q0_sales'),
+           th_annual_eps:num('th_annual_eps'), th_roe:num('th_roe'), th_rs:num('th_rs'),
+           w_q0:num('w_q0'), w_q1:num('w_q1'), w_2y:num('w_2y'), topn:parseInt($('topn').value)||50 };
+}
+function pctMap(rows, key) {
+  const vals = rows.map(r => r[key]).filter(v => v!=null && !isNaN(v)).sort((a,b)=>a-b);
+  return v => {
+    if (v==null || isNaN(v) || vals.length===0) return 0;
+    let lo=0, hi=vals.length;
+    while (lo<hi){ const m=(lo+hi)>>1; if (vals[m]<=v) lo=m+1; else hi=m; }
+    return lo / vals.length;
+  };
+}
+function renderRanking() {
+  const c = cfg();
+  const ok = r => r.q0_eps_yoy>=c.th_q0_eps && r.q1_eps_yoy>=c.th_q1_eps &&
+                  r.q0_sales_yoy>=c.th_q0_sales && r.annual_eps_yoy>=c.th_annual_eps &&
+                  r.roe>=c.th_roe && r.rs_rating>=c.th_rs;
+  const surv = METRICS.filter(r => ok(r));
+  const pQ0=pctMap(surv,'q0_eps_yoy'), pQ1=pctMap(surv,'q1_eps_yoy'), p2Y=pctMap(surv,'cagr_2y');
+  surv.forEach(r => r._score = 100*(c.w_q0*pQ0(r.q0_eps_yoy)+c.w_q1*pQ1(r.q1_eps_yoy)+c.w_2y*p2Y(r.cagr_2y)));
+  surv.sort((a,b)=> b._score - a._score);
+  const top = surv.slice(0, c.topn);
+  const fmt = (v,d=1)=> (v==null||isNaN(v))?'<span class="muted">---</span>':Number(v).toFixed(d);
+  const oku = v => (v==null||isNaN(v))?'<span class="muted">---</span>':(v/1e8).toFixed(1);
+  $('rankStatus').textContent = `計算完了！ ${METRICS.length}社中 ${surv.length}社が条件通過、上位${top.length}社を表示。`;
+  const tb = $('rankTable').querySelector('tbody'); tb.innerHTML='';
+  top.forEach((r,i)=>{
+    const tr=document.createElement('tr'); tr.onclick=()=>showDetail(r.code);
+    tr.innerHTML = `<td>${i+1}</td><td class="l">${r.code4}</td><td class="l">${r.name||''}</td>
+      <td class="pill">${fmt(r._score)}</td><td>${fmt(r.q0_eps_yoy)}</td><td>${fmt(r.q1_eps_yoy)}</td>
+      <td>${fmt(r.cagr_2y)}</td><td>${fmt(r.annual_eps_yoy)}</td><td>${fmt(r.roe)}</td>
+      <td>${r.rs_rating??'<span class="muted">--</span>'}</td><td>${fmt(r.equity_ratio)}</td><td>${oku(r.market_cap)}</td>`;
+    tb.appendChild(tr);
+  });
+  $('ranking').style.display=''; $('detail').style.display='none';
+}
+$('recalcBtn').onclick = renderRanking;
+$('searchBtn').onclick = () => {
+  const q = $('search').value.trim(); if(!q) return;
+  const m = METRICS.find(r => r.code4===q || r.code===q);
+  if (m) showDetail(m.code); else alert('該当銘柄が見つかりません: '+q);
+};
+
+// ===== 財務シリーズの復元（metrics.py のロジックをJS移植） =====
+const PORDER = {'1Q':1,'2Q':2,'3Q':3,'FY':4,'4Q':4,'Q1':1,'Q2':2,'Q3':3,'Q4':4};
+function yoy(cur, prev){ if(cur==null||prev==null||prev<=0) return null; return (cur-prev)/prev*100; }
+function singleSeries(stmts, field){
+  const byFy = {};
+  stmts.forEach(s => { if(PORDER[s.period_type] && s.fy_end){ (byFy[s.fy_end]=byFy[s.fy_end]||{})[s.period_type]=s; }});
+  const out=[];
+  Object.keys(byFy).forEach(fy=>{
+    const ps = Object.values(byFy[fy]).sort((a,b)=>PORDER[a.period_type]-PORDER[b.period_type]);
+    let prev=0;
+    ps.forEach(s=>{ const cum=s[field]; const single=(cum==null||prev==null)?null:cum-prev;
+      out.push({fy_end:fy, period_type:s.period_type, value:single, period_end:s.period_end});
+      if(cum!=null) prev=cum; });
+  });
+  out.sort((a,b)=> (a.period_end||'').localeCompare(b.period_end||''));
+  return out;
+}
+function withYoY(series){
+  const fySorted=[...new Set(series.map(d=>d.fy_end))].sort();
+  return series.map(d=>{
+    const i=fySorted.indexOf(d.fy_end);
+    let yv=null;
+    if(i>0){ const pf=fySorted[i-1]; const m=series.find(x=>x.fy_end===pf&&x.period_type===d.period_type); yv=m?m.value:null; }
+    return {label:(d.period_end||'').slice(0,7), value:d.value, yoy:yoy(d.value,yv)};
+  });
+}
+function annualSeries(stmts){
+  const fy=stmts.filter(s=>PORDER[s.period_type]===4).sort((a,b)=>(a.fy_end||'').localeCompare(b.fy_end||''));
+  return fy.map((s,i)=>({label:(s.fy_end||'').slice(0,4), eps:s.eps,
+      eps_yoy: i>0?yoy(s.eps,fy[i-1].eps):null,
+      roe:(s.np!=null&&s.eq)?s.np/s.eq*100:null }));
+}
+
+// ===== 詳細ビュー =====
+let charts=[];
+function clearCharts(){ charts.forEach(c=>{try{c.remove()}catch(e){}}); charts=[]; }
+function lineChart(el, data, color){
+  el.innerHTML='';
+  const ch=LightweightCharts.createChart(el,{height:el.clientHeight||160,layout:{background:{color:'#fff'},textColor:'#374151'},
+    rightPriceScale:{borderVisible:false},timeScale:{borderVisible:false},grid:{horzLines:{color:'#f1f5f9'},vertLines:{color:'#f8fafc'}}});
+  const s=ch.addLineSeries({color:color||'#2563eb',lineWidth:2});
+  s.setData(data.filter(d=>d.value!=null).map(d=>({time:d.time,value:d.value})));
+  ch.timeScale().fitContent(); charts.push(ch); return ch;
+}
+function histChart(el, data){
+  el.innerHTML='';
+  const ch=LightweightCharts.createChart(el,{height:el.clientHeight||160,layout:{background:{color:'#fff'},textColor:'#374151'},
+    rightPriceScale:{borderVisible:false},timeScale:{borderVisible:false},grid:{horzLines:{color:'#f1f5f9'},vertLines:{color:'#f8fafc'}}});
+  const s=ch.addHistogramSeries({});
+  s.setData(data.filter(d=>d.value!=null).map(d=>({time:d.time,value:d.value,color:d.value>=0?'#16a34a':'#dc2626'})));
+  ch.timeScale().fitContent(); charts.push(ch); return ch;
+}
+// 財務の擬似時間軸（決算ラベルを連番日付に割当ててlightweight-chartsに渡す）
+function seqTimes(n){ const out=[]; let d=new Date('2000-01-01'); for(let i=0;i<n;i++){ out.push(d.toISOString().slice(0,10)); d.setMonth(d.getMonth()+3);} return out; }
+function toTimed(arr, key){ const t=seqTimes(arr.length); return arr.map((d,i)=>({time:t[i], value:d[key]})); }
+
+function showDetail(code){
+  clearCharts();
+  const m = METRICS.find(r=>r.code===code) || {};
+  $('dName').textContent = m.name||''; $('dCode').textContent = m.code4||code;
+  // 価格
+  const px = query("SELECT date,open,high,low,close FROM prices WHERE code=? ORDER BY date",[code]);
+  const st = query("SELECT * FROM statements WHERE code=? ORDER BY period_end",[code]);
+  $('ranking').style.display='none'; $('detail').style.display='';
+  // 価格チャート
+  const pe=$('priceChart'); pe.innerHTML='';
+  const pch=LightweightCharts.createChart(pe,{height:360,layout:{background:{color:'#fff'},textColor:'#374151'},
+     rightPriceScale:{borderVisible:false},timeScale:{borderVisible:false,timeVisible:false},
+     grid:{horzLines:{color:'#f1f5f9'},vertLines:{color:'#f8fafc'}}});
+  const cs=pch.addCandlestickSeries({upColor:'#16a34a',downColor:'#dc2626',borderVisible:false,wickUpColor:'#16a34a',wickDownColor:'#dc2626'});
+  cs.setData(px.map(r=>({time:r.date,open:r.open,high:r.high,low:r.low,close:r.close})));
+  // 決算マーカー
+  const seen=new Set(); const markers=[];
+  st.forEach(s=>{ if(s.disclosed && !seen.has(s.disclosed)){ seen.add(s.disclosed);
+    markers.push({time:s.disclosed,position:'belowBar',color:'#2563eb',shape:'arrowUp',text:s.period_type||'決算'});}});
+  cs.setMarkers(markers.sort((a,b)=>a.time.localeCompare(b.time)));
+  pch.timeScale().fitContent(); charts.push(pch);
+  // カード
+  const fmt=(v,d=1,suf='')=> (v==null||isNaN(v))?'-':Number(v).toFixed(d)+suf;
+  $('cards').innerHTML = [
+    ['最新ROE (通期)', fmt(m.roe,1,'%')],
+    ['Q0 EPS YoY', fmt(m.q0_eps_yoy,1,'%')],
+    ['Q0 売上 YoY', fmt(m.q0_sales_yoy,1,'%')],
+    ['通期EPS YoY', fmt(m.annual_eps_yoy,1,'%')],
+    ['2年EPS CAGR', fmt(m.cagr_2y,1,'%')],
+    ['RS', m.rs_rating??'-'],
+  ].map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  // 財務チャート
+  const qeps=withYoY(singleSeries(st,'eps'));
+  const qsales=withYoY(singleSeries(st,'sales'));
+  const ann=annualSeries(st);
+  lineChart($('cRoe'), toTimed(ann,'roe'), '#2563eb');
+  lineChart($('cQeps'), toTimed(qeps,'value'), '#2563eb');
+  histChart($('cQepsYoy'), toTimed(qeps,'yoy'));
+  lineChart($('cAeps'), toTimed(ann,'eps'), '#2563eb');
+  histChart($('cAepsYoy'), toTimed(ann,'eps_yoy'));
+  lineChart($('cQsales'), toTimed(qsales,'value'), '#0891b2');
+  histChart($('cQsalesYoy'), toTimed(qsales,'yoy'));
+}
+$('back').onclick = ()=>{ $('ranking').style.display=''; $('detail').style.display='none'; };
+
+// ===== 起動 =====
+autoLoad();
+</script>
+</body>
+</html>

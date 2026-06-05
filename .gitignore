@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# 生成物（CIで作るのでコミットしない）
+batch/oneil.db
+batch/oneil.db.gz
+site/oneil.db
+site/oneil.db.gz
+
+# ローカル設定・鍵（絶対にコミットしない）
+.env
+*.local
+config.yaml

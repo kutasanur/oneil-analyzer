@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>マーケット天井検出（分配日カウント）</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --line:#e5e7eb; --ink:#1f2937; --sub:#6b7280; --accent:#2563eb; }
+  *{box-sizing:border-box;} body{margin:0;font-family:-apple-system,"Segoe UI",Meiryo,sans-serif;background:var(--bg);color:var(--ink);}
+  header{background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;gap:14px;align-items:center;position:sticky;top:0;z-index:10;}
+  header h1{font-size:18px;margin:0;color:var(--accent);} header .sp{flex:1;}
+  header a{font-size:13px;color:var(--accent);text-decoration:none;}
+  .wrap{display:flex;align-items:flex-start;}
+  aside{width:230px;min-width:230px;padding:14px;}
+  aside .grp{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;}
+  aside h2{font-size:13px;color:var(--sub);margin:14px 0 6px;}
+  label{display:block;font-size:11px;color:var(--sub);margin:6px 0 2px;}
+  input{width:100%;border:1px solid var(--line);border-radius:6px;padding:5px;}
+  button{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;padding:7px 12px;cursor:pointer;width:100%;margin-top:8px;}
+  main{flex:1;padding:14px 18px;}
+  .banner{padding:12px 14px;border-radius:8px;font-weight:600;margin-bottom:12px;}
+  .ok{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}
+  .warn{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;}
+  .chart{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:12px;}
+  .chart h3{margin:2px 6px 8px;font-size:13px;color:var(--sub);}
+  .status{font-size:12px;color:var(--sub);} .filebar input{font-size:12px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>マーケット天井検出</h1><span class="sp"></span>
+  <a href="index.html">← 成長株ランキングへ</a>
+</header>
+<div class="wrap">
+  <aside>
+    <h2>データベース</h2>
+    <div class="grp filebar status"><div id="dbStatus">読み込み中…</div>
+      <label>ローカルDBを指定</label><input type="file" id="dbFile" accept=".db,.sqlite,.gz" /></div>
+    <h2>分配日パラメータ</h2>
+    <div class="grp">
+      <label>下落率しきい値 (%)</label><input id="decline_pct" type="number" step="0.1" value="0.2" />
+      <label>カウント窓 (営業日)</label><input id="window" type="number" value="25" />
+      <label>失効する上昇率 (%)</label><input id="expire_gain_pct" type="number" value="5" />
+      <label>警戒とみなす本数</label><input id="count_threshold" type="number" value="5" />
+      <button id="recalc">再計算</button>
+    </div>
+    <div class="grp status">
+      分配日＝指数が前日比 −(しきい値)% 以下で下落し、かつ出来高が前日より増えた日。<br>
+      窓内に規定本数たまると天井警戒。出来高は市場全体（全銘柄合計）を使用。
+    </div>
+  </aside>
+  <main>
+    <div id="banner" class="banner ok">計算待ち…</div>
+    <div class="chart"><h3>TOPIX 終値 ＋ 分配日マーカー</h3><div id="priceChart" style="height:340px;"></div></div>
+    <div class="chart"><h3>有効な分配日カウント（赤=警戒）</h3><div id="countChart" style="height:160px;"></div></div>
+  </main>
+</div>
+
+<script src="./vendor/sql-wasm.js"></script>
+<script src="./vendor/lightweight-charts.js"></script>
+<script>
+let DB=null, IDX=[]; const $=(id)=>document.getElementById(id);
+async function initSql(){ return await initSqlJs({locateFile:f=>`./vendor/${f}`}); }
+async function gunzip(buf){ const ds=new DecompressionStream('gzip');
+  const s=new Response(buf).body.pipeThrough(ds); return new Uint8Array(await new Response(s).arrayBuffer()); }
+async function loadBytes(bytes,isGz){ const SQL=await initSql(); DB=new SQL.Database(isGz?await gunzip(bytes):bytes); afterLoad(); }
+async function autoLoad(){ try{ const r=await fetch('oneil.db.gz',{cache:'no-cache'}); if(!r.ok) throw 0;
+    await loadBytes(new Uint8Array(await r.arrayBuffer()),true);
+  }catch(e){ $('dbStatus').innerHTML='自動取得できません。ローカルDBを指定してください。'; } }
+$('dbFile').addEventListener('change',async ev=>{ const f=ev.target.files[0]; if(!f) return;
+  await loadBytes(new Uint8Array(await f.arrayBuffer()), f.name.endsWith('.gz')); });
+function query(sql){ const r=[],st=DB.prepare(sql); while(st.step()) r.push(st.getAsObject()); st.free(); return r; }
+function afterLoad(){ const meta={}; query("SELECT key,value FROM meta").forEach(r=>meta[r.key]=r.value);
+  $('dbStatus').innerHTML=`読み込み完了 ✓ 基準日:${meta['asof']||'-'}`;
+  IDX=query("SELECT date,close,volume FROM index_prices ORDER BY date"); recalc(); }
+
+// distribution.py のJS移植
+function analyze(rows,c){
+  const out=[]; let active=[];
+  for(let i=0;i<rows.length;i++){
+    let ret=null, isDist=false;
+    if(i>=1 && rows[i-1].close){ ret=(rows[i].close/rows[i-1].close-1)*100;
+      const volUp=rows[i].volume!=null&&rows[i-1].volume!=null&&rows[i].volume>rows[i-1].volume;
+      isDist=(ret<=-c.decline_pct)&&volUp; }
+    active=active.filter(j=>(i-j)<c.window && rows[i].close<rows[j].close*(1+c.expire_gain_pct/100));
+    if(isDist) active.push(i);
+    out.push({date:rows[i].date,close:rows[i].close,is:isDist,count:active.length,caution:active.length>=c.count_threshold});
+  }
+  return out;
+}
+let charts=[];
+function recalc(){
+  if(!IDX.length){ return; }
+  charts.forEach(c=>{try{c.remove()}catch(e){}}); charts=[];
+  const num=id=>parseFloat($(id).value);
+  const c={decline_pct:num('decline_pct'),window:num('window'),expire_gain_pct:num('expire_gain_pct'),count_threshold:num('count_threshold')};
+  const rec=analyze(IDX,c);
+  const last=rec[rec.length-1];
+  const b=$('banner');
+  if(last.caution){ b.className='banner warn'; b.textContent=`⚠ 天井警戒: 直近${c.window}営業日に有効な分配日が ${last.count} 本（しきい値${c.count_threshold}）。新規買いは慎重に。`; }
+  else { b.className='banner ok'; b.textContent=`現在は警戒域外: 有効な分配日 ${last.count} 本（しきい値${c.count_threshold}）。`; }
+  // 価格チャート
+  const pe=$('priceChart'); pe.innerHTML='';
+  const pch=LightweightCharts.createChart(pe,{height:340,layout:{background:{color:'#fff'},textColor:'#374151'},
+    rightPriceScale:{borderVisible:false},timeScale:{borderVisible:false},grid:{horzLines:{color:'#f1f5f9'},vertLines:{color:'#f8fafc'}}});
+  const ls=pch.addLineSeries({color:'#2563eb',lineWidth:2});
+  ls.setData(IDX.map(r=>({time:r.date,value:r.close})));
+  ls.setMarkers(rec.filter(r=>r.is).map(r=>({time:r.date,position:'aboveBar',color:'#dc2626',shape:'arrowDown',text:'D'})));
+  pch.timeScale().fitContent(); charts.push(pch);
+  // カウントチャート
+  const ce=$('countChart'); ce.innerHTML='';
+  const cch=LightweightCharts.createChart(ce,{height:160,layout:{background:{color:'#fff'},textColor:'#374151'},
+    rightPriceScale:{borderVisible:false},timeScale:{borderVisible:false},grid:{horzLines:{color:'#f1f5f9'},vertLines:{color:'#f8fafc'}}});
+  const hs=cch.addHistogramSeries({});
+  hs.setData(rec.map(r=>({time:r.date,value:r.count,color:r.caution?'#dc2626':'#9ca3af'})));
+  cch.timeScale().fitContent(); charts.push(cch);
+}
+$('recalc').onclick=recalc;
+autoLoad();
+</script>
+</body>
+</html>

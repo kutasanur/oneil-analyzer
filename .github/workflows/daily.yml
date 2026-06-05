@@ -1,0 +1,93 @@
+name: daily
+
+on:
+  schedule:
+    # 毎日 07:00 JST（前日終値・確報がそろう時刻）= 22:00 UTC
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+    inputs:
+      max_codes:
+        description: "ユニバースを先頭N銘柄に制限（スモークテスト用。空欄=全銘柄）"
+        required: false
+        default: ""
+
+permissions:
+  contents: write     # data ブランチへのpush
+  issues: write       # 通知Issueの作成
+  pages: write        # GitHub Pages デプロイ
+  id-token: write     # Pages デプロイの認証
+
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依存インストール
+        run: pip install -r batch/requirements.txt
+
+      - name: 前回のDBを data ブランチから復元
+        run: |
+          git fetch origin data --depth=1 2>/dev/null || echo "data ブランチ無し（初回）"
+          if git show origin/data:oneil.db > batch/oneil.db 2>/dev/null; then
+            echo "復元: $(du -h batch/oneil.db | cut -f1)"
+          else
+            echo "初回フルビルド"; rm -f batch/oneil.db
+          fi
+
+      - name: DB構築（J-Quants取得→指標計算）
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+        run: |
+          ARGS="--gzip"
+          if [ -n "${{ github.event.inputs.max_codes }}" ]; then
+            ARGS="$ARGS --max-codes ${{ github.event.inputs.max_codes }}"
+          fi
+          python batch/build_db.py $ARGS
+
+      - name: 通知（新規ランクイン / 天井警戒）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: python batch/notify.py
+
+      - name: DBを data ブランチへ保存（単一コミットで履歴肥大化なし）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/data && cp batch/oneil.db /tmp/data/oneil.db
+          cd /tmp/data
+          git init -q
+          git checkout -q -b data
+          git add oneil.db
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "data: $(date -u +%FT%TZ)"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
+
+      - name: サイト組み立て（HTML + oneil.db.gz）
+        run: |
+          mkdir -p _site
+          cp -r site/* _site/
+          cp batch/oneil.db.gz _site/oneil.db.gz
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
