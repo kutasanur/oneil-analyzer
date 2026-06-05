@@ -10,6 +10,14 @@ on:
         description: "ユニバースを先頭N銘柄に制限（スモークテスト用。空欄=全銘柄）"
         required: false
         default: ""
+      days_prices:
+        description: "価格の取得暦日数（スモーク用に短縮。空欄=既定600日）"
+        required: false
+        default: ""
+      days_stmts:
+        description: "財務の取得暦日数（スモーク用に短縮。空欄=既定1300日）"
+        required: false
+        default: ""
 
 permissions:
   contents: write     # data ブランチへのpush
@@ -51,6 +59,13 @@ jobs:
           if [ -n "${{ github.event.inputs.max_codes }}" ]; then
             ARGS="$ARGS --max-codes ${{ github.event.inputs.max_codes }}"
           fi
+          if [ -n "${{ github.event.inputs.days_prices }}" ]; then
+            ARGS="$ARGS --days-prices ${{ github.event.inputs.days_prices }}"
+          fi
+          if [ -n "${{ github.event.inputs.days_stmts }}" ]; then
+            ARGS="$ARGS --days-stmts ${{ github.event.inputs.days_stmts }}"
+          fi
+          echo "build_db args: $ARGS"
           python batch/build_db.py $ARGS
 
       - name: 通知（新規ランクイン / 天井警戒）
