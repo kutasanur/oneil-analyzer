@@ -32,8 +32,9 @@ logger = logging.getLogger("jquants")
 JQ_BASE = "https://api.jquants.com/v2"
 _TIMEOUT = 60
 _MAX_PAGES = 200          # ページネーション安全弁
-_SLEEP_BETWEEN = 0.2      # 連続リクエストの礼儀（秒）
-_RETRY_429 = 5
+_MIN_INTERVAL = 0.4       # 全リクエスト間の最小間隔（秒）＝429回避の定常スロットル
+_RETRY_429 = 8            # 429/5xx の再試行回数（指数バックオフ）
+_last_req = 0.0           # 直近リクエスト時刻（モジュール内・スロットル用）
 
 
 def get_api_key() -> str:
@@ -51,6 +52,33 @@ def _headers() -> dict:
     return {"x-api-key": get_api_key()}
 
 
+def _throttle() -> None:
+    """全リクエスト間に最小間隔を空け、429（レート制限）を予防する。"""
+    global _last_req
+    wait = _MIN_INTERVAL - (time.monotonic() - _last_req)
+    if wait > 0:
+        time.sleep(wait)
+    _last_req = time.monotonic()
+
+
+def _get(url: str, params: dict):
+    """スロットル＋429/5xxの指数バックオフ再試行つきGET（Retry-Afterを尊重）。"""
+    headers = _headers()
+    for attempt in range(_RETRY_429):
+        _throttle()
+        r = requests.get(url, headers=headers, params=params, timeout=_TIMEOUT)
+        if r.status_code == 429 or r.status_code >= 500:
+            ra = r.headers.get("Retry-After", "")
+            wait = float(ra) if ra.isdigit() else min(60.0, 1.5 * (2 ** attempt))
+            logger.warning("HTTP %d: %.1fs待機して再試行 (試行%d/%d) %s",
+                           r.status_code, wait, attempt + 1, _RETRY_429, url)
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+        return r
+    raise RuntimeError(f"レート制限/サーバエラーが続いたため中断: {url}")
+
+
 def pick(d: dict, *names: str, default: Any = None) -> Any:
     """dictから最初に見つかったキーの値を返す（V2略称/V1長名の差異を吸収）。"""
     for n in names:
@@ -65,23 +93,11 @@ def _paginate(path: str, params: dict | None = None,
     pagination_key を辿って全件取得する共通ヘルパ。
     data_keys: レスポンス本体が入っているキーの候補（V2は "data"）。
     """
-    headers = _headers()
     params = dict(params or {})
     rows: list[dict] = []
+    url = f"{JQ_BASE}{path}"
     for _ in range(_MAX_PAGES):
-        url = f"{JQ_BASE}{path}"
-        for attempt in range(_RETRY_429):
-            r = requests.get(url, headers=headers, params=params, timeout=_TIMEOUT)
-            if r.status_code == 429:
-                wait = 2.0 * (attempt + 1)
-                logger.warning("429 Too Many Requests: %.1fs 待機して再試行", wait)
-                time.sleep(wait)
-                continue
-            r.raise_for_status()
-            break
-        else:
-            raise RuntimeError(f"429が続いたため中断: {url}")
-
+        r = _get(url, params)
         js = r.json()
         chunk: list[dict] = []
         for k in data_keys:
@@ -94,7 +110,6 @@ def _paginate(path: str, params: dict | None = None,
         if not pkey:
             break
         params["pagination_key"] = pkey
-        time.sleep(_SLEEP_BETWEEN)
     return rows
 
 
