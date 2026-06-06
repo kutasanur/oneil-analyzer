@@ -1,0 +1,64 @@
+name: backfill-history
+
+# 過去の日次株価を一括ダウンロードしてアーティファクト(zip)で受け取る。
+# Standardプラン(10年)が有効なうちに走らせる用途。手動起動のみ。
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "今日から何年分さかのぼるか（Standard=10）"
+        required: false
+        default: "10"
+      to_date:
+        description: "終了日 YYYY-MM-DD（既存データ直前。既定=2024-12-22）"
+        required: false
+        default: "2024-12-22"
+      from_date:
+        description: "開始日 YYYY-MM-DD（空欄=yearsから自動。例:2016-06-01）"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330   # 念のため上限近く（実測は1〜2時間程度の見込み）
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依存インストール
+        run: pip install requests
+
+      - name: 過去株価を一括ダウンロード
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+        run: |
+          ARGS="--out history_out --years ${{ github.event.inputs.years }} --to ${{ github.event.inputs.to_date }}"
+          if [ -n "${{ github.event.inputs.from_date }}" ]; then
+            ARGS="$ARGS --from ${{ github.event.inputs.from_date }}"
+          fi
+          echo "download args: $ARGS"
+          python backfill/download_history.py $ARGS
+          echo "----- 生成ファイル数 -----"
+          ls history_out | wc -l
+          echo "----- 合計サイズ -----"
+          du -sh history_out
+
+      - name: tar.gz にまとめる
+        run: |
+          tar czf jquants_history.tar.gz -C history_out .
+          echo "アーカイブサイズ:"; du -h jquants_history.tar.gz
+
+      - name: アーティファクトとしてアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: jquants_history
+          path: jquants_history.tar.gz
+          retention-days: 7
+          compression-level: 0   # 中身は既にgzip圧縮済み
