@@ -42,13 +42,14 @@ jobs:
       - name: 依存インストール
         run: pip install -r batch/requirements.txt
 
-      - name: 前回のDBを data ブランチから復元
+      - name: 前回のDBを data ブランチから復元（gzipで保存・100MB制限回避）
         run: |
           git fetch origin data --depth=1 2>/dev/null || echo "data ブランチ無し（初回）"
-          if git show origin/data:oneil.db > batch/oneil.db 2>/dev/null; then
+          if git show origin/data:oneil.db.gz > batch/oneil.db.gz 2>/dev/null; then
+            gunzip -kf batch/oneil.db.gz
             echo "復元: $(du -h batch/oneil.db | cut -f1)"
           else
-            echo "初回フルビルド"; rm -f batch/oneil.db
+            echo "初回フルビルド"; rm -f batch/oneil.db batch/oneil.db.gz
           fi
 
       - name: DB構築（J-Quants取得→指標計算）
@@ -79,11 +80,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p /tmp/data && cp batch/oneil.db /tmp/data/oneil.db
+          mkdir -p /tmp/data && cp batch/oneil.db.gz /tmp/data/oneil.db.gz
           cd /tmp/data
           git init -q
           git checkout -q -b data
-          git add oneil.db
+          git add oneil.db.gz
           git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "data: $(date -u +%FT%TZ)"
           git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
 
