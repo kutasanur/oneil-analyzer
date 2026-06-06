@@ -29,6 +29,7 @@ import pandas as pd
 import jquants as jq
 import metrics as M
 import distribution as D
+import netnet as NN
 
 logger = logging.getLogger("build_db")
 
@@ -270,6 +271,10 @@ def compute_distribution_state(conn) -> dict:
     return st
 
 
+def compute_pbr_history(conn):
+    NN.compute_and_store_pbr(conn)
+
+
 # ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
@@ -325,6 +330,8 @@ def main(args):
     compute_and_store_metrics(conn, asof)
     st = compute_distribution_state(conn)
     logger.info("分配日: active=%d caution=%s (%s)", st["active_count"], st["caution"], st["date"])
+    compute_pbr_history(conn)
+    logger.info("PBR履歴計算完了")
 
     # メタ確定（最後）
     if last_price_done:

@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>バリュー株ランキング（低PBR）</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --line:#e5e7eb; --ink:#1f2937; --sub:#6b7280;
+          --accent:#2563eb; --green:#059669; --amber:#d97706; }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,"Segoe UI","Hiragino Kaku Gothic ProN",Meiryo,sans-serif;
+       background:var(--bg);color:var(--ink);}
+  header{background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;
+         display:flex;gap:14px;align-items:center;position:sticky;top:0;z-index:20;}
+  header h1{font-size:18px;margin:0;color:var(--accent);font-weight:700;}
+  header .sp{flex:1;}
+  header a{font-size:13px;color:var(--accent);text-decoration:none;white-space:nowrap;}
+  header a:hover{text-decoration:underline;}
+
+  .wrap{display:flex;align-items:flex-start;}
+  aside{width:230px;min-width:230px;padding:14px;}
+  aside h2{font-size:13px;color:var(--sub);margin:14px 0 6px;letter-spacing:.04em;}
+  aside .grp{background:var(--card);border:1px solid var(--line);border-radius:8px;
+             padding:10px;margin-bottom:10px;}
+  label{display:block;font-size:11px;color:var(--sub);margin:6px 0 2px;}
+  input{width:100%;border:1px solid var(--line);border-radius:6px;padding:5px;font-size:13px;}
+  button{border:1px solid var(--accent);background:var(--accent);color:#fff;
+         border-radius:6px;padding:7px 12px;cursor:pointer;width:100%;margin-top:8px;font-size:13px;}
+  button:hover{background:#1d4ed8;}
+
+  main{flex:1;padding:14px 18px;min-width:0;}
+  .status{font-size:12px;color:var(--sub);margin-bottom:8px;}
+
+  table{width:100%;border-collapse:collapse;background:var(--card);border-radius:8px;
+        overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04);font-size:13px;}
+  th,td{padding:9px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;}
+  th{background:#fafbfc;color:var(--sub);font-weight:600;}
+  td.l,th.l{text-align:left;}
+  tbody tr{cursor:pointer;} tbody tr:hover{background:#f0f6ff;}
+
+  .pbr-low{color:var(--green);font-weight:700;}
+  .pbr-mid{color:var(--amber);font-weight:700;}
+  .pbr-hi {color:var(--sub);}
+
+  .chart{background:var(--card);border:1px solid var(--line);border-radius:8px;
+         padding:8px;margin-bottom:12px;}
+  .chart h3{margin:2px 6px 8px;font-size:13px;color:var(--sub);font-weight:600;}
+
+  .back{color:var(--accent);cursor:pointer;font-size:13px;font-weight:500;
+        display:inline-block;margin-bottom:8px;}
+  .dh{display:flex;align-items:baseline;gap:12px;margin:6px 0 12px;}
+  .dh h2{margin:0;font-size:24px;font-weight:700;}
+  .dh .code{color:var(--sub);font-size:15px;}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+         gap:10px;margin:10px 0 18px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;}
+  .card .k{font-size:11px;color:var(--sub);}
+  .card .v{font-size:22px;font-weight:700;}
+
+  .note{font-size:11px;color:var(--sub);line-height:1.7;}
+
+  @media(max-width:760px){aside{display:none;}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>バリュー株ランキング（低PBR）</h1>
+  <span class="sp"></span>
+  <a href="index.html">成長株ランキング</a>
+  <a href="market.html">マーケット天井</a>
+</header>
+
+<div class="wrap">
+  <aside>
+    <h2>データベース</h2>
+    <div class="grp status">
+      <div id="dbStatus">読み込み中…</div>
+      <label>ローカルDBを指定</label>
+      <input type="file" id="dbFile" accept=".db,.sqlite,.gz" />
+    </div>
+
+    <h2>スクリーニング</h2>
+    <div class="grp">
+      <label>PBR 上限</label>
+      <input id="pbr_max" type="number" step="0.1" value="1.0" min="0.1" max="5" />
+      <label>ROE% 下限</label>
+      <input id="roe_min" type="number" step="1" value="0" />
+      <label>時価総額 下限（億円）</label>
+      <input id="cap_min" type="number" step="10" value="30" min="0" />
+      <label>表示件数</label>
+      <input id="topn" type="number" value="100" min="10" max="500" />
+      <button id="applyBtn">適用</button>
+    </div>
+
+    <h2>注記</h2>
+    <div class="grp note">
+      PBR = 株価 ÷ BPS（1株純資産）。<br>
+      1.0 未満 = 純資産を下回る価格で買える銘柄。<br>
+      0.5 未満（緑）で特に割安、0.5〜0.8（橙）でやや割安。<br><br>
+      BPS は /fins/summary（通期決算）の最新値を使用。<br>
+      グレアム流ネットネット（流動資産×割引−全負債）は<br>
+      BS詳細データ取得後に拡張予定。
+    </div>
+  </aside>
+
+  <main>
+    <!-- ランキング -->
+    <div id="ranking-section">
+      <div id="rankStatus" class="status">読み込み中…</div>
+      <table>
+        <thead>
+          <tr>
+            <th class="l">コード</th>
+            <th class="l">企業名</th>
+            <th class="l">業種</th>
+            <th>PBR</th>
+            <th>株価(円)</th>
+            <th>BPS(円)</th>
+            <th>時価総額</th>
+            <th>ROE%</th>
+            <th>RS</th>
+          </tr>
+        </thead>
+        <tbody id="rankBody"></tbody>
+      </table>
+    </div>
+
+    <!-- 銘柄詳細（クリックで表示） -->
+    <div id="detail" style="display:none;">
+      <span class="back" id="backBtn">← ランキングへ戻る</span>
+      <div class="dh">
+        <h2 id="dName"></h2>
+        <span class="code" id="dCode"></span>
+      </div>
+      <div class="cards" id="dCards"></div>
+
+      <div class="chart">
+        <h3>PBR 推移（通期決算開示ベース）</h3>
+        <div id="pbrChart" style="height:280px;"></div>
+      </div>
+      <div class="chart">
+        <h3>株価 vs BPS（純資産/株）</h3>
+        <div id="bpsChart" style="height:220px;"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="./vendor/sql-wasm.js"></script>
+<script src="./vendor/lightweight-charts.js"></script>
+<script>
+/* ===== DB読み込み（market.htmlと同パターン）===== */
+let DB = null;
+const $ = id => document.getElementById(id);
+
+async function initSql() { return await initSqlJs({ locateFile: f => `./vendor/${f}` }); }
+
+async function gunzip(buf) {
+  const ds = new DecompressionStream('gzip');
+  const s = new Response(buf).body.pipeThrough(ds);
+  return new Uint8Array(await new Response(s).arrayBuffer());
+}
+
+async function loadBytes(bytes, isGz) {
+  const SQL = await initSql();
+  DB = new SQL.Database(isGz ? await gunzip(bytes) : bytes);
+  afterLoad();
+}
+
+async function autoLoad() {
+  try {
+    const r = await fetch('oneil.db.gz', { cache: 'no-cache' });
+    if (!r.ok) throw 0;
+    await loadBytes(new Uint8Array(await r.arrayBuffer()), true);
+  } catch(e) {
+    $('dbStatus').innerHTML = '自動取得できません。ローカルDBを指定してください。';
+  }
+}
+
+$('dbFile').addEventListener('change', async ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  await loadBytes(new Uint8Array(await f.arrayBuffer()), f.name.endsWith('.gz'));
+});
+
+/* ===== クエリ（パラメータ対応）===== */
+function query(sql, params = []) {
+  const r = [], st = DB.prepare(sql);
+  if (params.length) st.bind(params);
+  while (st.step()) r.push(st.getAsObject());
+  st.free();
+  return r;
+}
+
+/* ===== 初期化 ===== */
+function afterLoad() {
+  const meta = {};
+  query("SELECT key,value FROM meta").forEach(r => meta[r.key] = r.value);
+  $('dbStatus').innerHTML = `読み込み完了 ✓ 基準日: ${meta['asof'] || '-'}`;
+  applyFilters();
+}
+
+/* ===== ランキング ===== */
+let RANKING = [];
+
+function applyFilters() {
+  if (!DB) return;
+  const pbr_max = parseFloat($('pbr_max').value) || 1.0;
+  const roe_min  = parseFloat($('roe_min').value)  || 0;
+  const cap_min  = (parseFloat($('cap_min').value)  || 0) * 1e8;
+  const topn     = parseInt($('topn').value)         || 100;
+
+  // 最新FY BPS + 最新終値で現在のPBRを計算
+  RANKING = query(`
+    SELECT
+      h.code, c.code4, c.name, c.sector, c.market,
+      h.bps,
+      p.close,
+      ROUND(CAST(p.close AS REAL) / CAST(h.bps AS REAL), 3) AS pbr,
+      m.market_cap, m.roe, m.equity_ratio, m.rs_rating
+    FROM (
+      SELECT code, MAX(fy_end) AS latest_fy FROM pbr_history GROUP BY code
+    ) lh
+    JOIN pbr_history h ON h.code = lh.code AND h.fy_end = lh.latest_fy
+    JOIN (
+      SELECT code, MAX(date) AS mdate FROM prices GROUP BY code
+    ) lp ON lp.code = h.code
+    JOIN prices p ON p.code = lp.code AND p.date = lp.mdate
+    JOIN companies c ON c.code = h.code
+    LEFT JOIN metrics m ON m.code = h.code
+    WHERE h.bps > 0 AND p.close > 0
+      AND ROUND(CAST(p.close AS REAL) / CAST(h.bps AS REAL), 3) > 0
+      AND ROUND(CAST(p.close AS REAL) / CAST(h.bps AS REAL), 3) <= ?
+      AND (m.roe IS NULL OR m.roe >= ?)
+      AND (m.market_cap IS NULL OR m.market_cap >= ?)
+    ORDER BY ROUND(CAST(p.close AS REAL) / CAST(h.bps AS REAL), 3) ASC
+    LIMIT ?
+  `, [pbr_max, roe_min, cap_min, topn]);
+
+  $('rankStatus').textContent =
+    `${RANKING.length} 銘柄（PBR≤${pbr_max}、ROE≥${roe_min}%、時価総額≥${$('cap_min').value}億）`;
+  renderRanking();
+}
+
+function pbrClass(v) {
+  if (v < 0.5) return 'pbr-low';
+  if (v < 0.8) return 'pbr-mid';
+  return 'pbr-hi';
+}
+
+function fmt(v, d = 1, suf = '') {
+  return (v == null || isNaN(Number(v))) ? '-' : Number(v).toFixed(d) + suf;
+}
+
+function fmtCap(v) {
+  if (v == null || isNaN(Number(v))) return '-';
+  const oku = Math.round(Number(v) / 1e8);
+  return oku >= 10000 ? (oku / 10000).toFixed(1) + '兆' : oku + '億';
+}
+
+function renderRanking() {
+  const tbody = $('rankBody'); tbody.innerHTML = '';
+  RANKING.forEach(r => {
+    const pbr = Number(r.pbr);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="l"><b>${r.code4 || r.code}</b></td>
+      <td class="l">${r.name || ''}</td>
+      <td class="l" style="font-size:11px;color:var(--sub)">${r.sector || ''}</td>
+      <td class="${pbrClass(pbr)}">${fmt(pbr, 2)}</td>
+      <td>${fmt(r.close, 0)}</td>
+      <td>${fmt(r.bps,   0)}</td>
+      <td>${fmtCap(r.market_cap)}</td>
+      <td>${fmt(r.roe,   1, '%')}</td>
+      <td>${r.rs_rating ?? '-'}</td>`;
+    tr.onclick = () => showDetail(r.code);
+    tbody.appendChild(tr);
+  });
+}
+
+/* ===== 銘柄詳細 ===== */
+let charts = [];
+function clearCharts() {
+  charts.forEach(c => { try { c.remove(); } catch(e) {} });
+  charts = [];
+}
+
+function showDetail(code) {
+  clearCharts();
+  const m = RANKING.find(r => r.code === code) || {};
+  $('dName').textContent = m.name || '';
+  $('dCode').textContent = m.code4 || code;
+
+  // カード
+  $('dCards').innerHTML = [
+    ['現在のPBR',     fmt(m.pbr, 2)],
+    ['BPS（純資産/株）', fmt(m.bps, 0, '円')],
+    ['現在の株価',    fmt(m.close, 0, '円')],
+    ['時価総額',      fmtCap(m.market_cap)],
+    ['ROE%',         fmt(m.roe, 1, '%')],
+    ['自己資本比率',  fmt(m.equity_ratio, 1, '%')],
+  ].map(([k, v]) =>
+    `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`
+  ).join('');
+
+  // PBR履歴（通期ベース）
+  const hist = query(
+    "SELECT disclosed, fy_end, bps, close, pbr FROM pbr_history WHERE code=? ORDER BY fy_end",
+    [code]
+  );
+
+  $('ranking-section').style.display = 'none';
+  $('detail').style.display = '';
+
+  // --- PBR推移チャート ---
+  const pe = $('pbrChart'); pe.innerHTML = '';
+  if (hist.length >= 2) {
+    const pch = LightweightCharts.createChart(pe, {
+      height: 280,
+      layout: { background: { color: '#fff' }, textColor: '#374151' },
+      rightPriceScale: { borderVisible: false },
+      timeScale: { borderVisible: false },
+      grid: { horzLines: { color: '#f1f5f9' }, vertLines: { color: '#f8fafc' } },
+    });
+    const ls = pch.addLineSeries({ color: '#2563eb', lineWidth: 2, title: 'PBR' });
+    ls.setData(hist.map(r => ({ time: r.disclosed, value: Number(r.pbr) })));
+    // PBR=1.0 基準線（赤点線）
+    ls.createPriceLine({
+      price: 1.0, color: '#dc2626', lineWidth: 1, lineStyle: 2, title: 'PBR=1.0'
+    });
+    pch.timeScale().fitContent();
+    charts.push(pch);
+  } else {
+    pe.innerHTML = '<div style="padding:20px;color:#6b7280;font-size:13px;">PBR履歴データが不足しています（通期決算が2期以上必要）</div>';
+  }
+
+  // --- BPS vs 株価チャート ---
+  const be = $('bpsChart'); be.innerHTML = '';
+  if (hist.length >= 1) {
+    const bch = LightweightCharts.createChart(be, {
+      height: 220,
+      layout: { background: { color: '#fff' }, textColor: '#374151' },
+      rightPriceScale: { borderVisible: false },
+      timeScale: { borderVisible: false },
+      grid: { horzLines: { color: '#f1f5f9' }, vertLines: { color: '#f8fafc' } },
+    });
+    // BPS（実線・緑）
+    const bs = bch.addLineSeries({ color: '#059669', lineWidth: 2, title: 'BPS' });
+    bs.setData(hist.map(r => ({ time: r.disclosed, value: Number(r.bps) })));
+    // 株価（破線・青）
+    const cs = bch.addLineSeries({ color: '#2563eb', lineWidth: 2, lineStyle: 2, title: '株価' });
+    cs.setData(hist.map(r => ({ time: r.disclosed, value: Number(r.close) })));
+    bch.timeScale().fitContent();
+    charts.push(bch);
+  }
+}
+
+$('backBtn').onclick = () => {
+  $('ranking-section').style.display = '';
+  $('detail').style.display = 'none';
+  clearCharts();
+};
+
+$('applyBtn').onclick = applyFilters;
+
+autoLoad();
+</script>
+</body>
+</html>
