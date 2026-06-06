@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -32,6 +33,17 @@ import numpy as np
 import pandas as pd
 
 from jquants import pick, to_float, to_int
+
+
+def _num(v) -> bool:
+    """有効な数値か（None と NaN を除外）。
+    重要: pandas経由でDBを読むと NULL は NaN(float) になり `is not None` を通過する。
+    決算短信の業績予想修正など実績が空の行を確実に除外するため、ここで NaN も弾く。"""
+    if v is None:
+        return False
+    if isinstance(v, float) and math.isnan(v):
+        return False
+    return True
 
 # 会計期間の並び順（1Q<2Q<3Q<FY）
 _PERIOD_ORDER = {
@@ -99,7 +111,7 @@ def normalize_statement(raw: dict) -> Stmt | None:
 # ---------------------------------------------------------------------------
 
 def yoy(cur: float | None, prev: float | None) -> float | None:
-    if cur is None or prev is None:
+    if not _num(cur) or not _num(prev):
         return None
     if prev <= 0:
         return None
@@ -116,30 +128,30 @@ def single_quarter_series(stmts: list[Stmt], field: str) -> list[dict]:
     時系列（period_end昇順）で並べたレコード列を返す。
     各レコード: {fy_end, period_type, value, period_end, disclosed}
     """
+    # 実績値がnullの行（業績予想の修正・速報など）は除外。
+    # 同一(会計年度, 会計期間)が複数あれば最新開示（修正後）を採用。
     fy_map: dict[str, dict[str, Stmt]] = defaultdict(dict)
     for s in stmts:
-        if s.period_type in _PERIOD_ORDER and s.fy_end:
-            fy_map[s.fy_end][s.period_type] = s
+        v = getattr(s, field)
+        if s.period_type in _PERIOD_ORDER and s.fy_end and _num(v):
+            cur = fy_map[s.fy_end].get(s.period_type)
+            if cur is None or (s.disclosed or "") >= (cur.disclosed or ""):
+                fy_map[s.fy_end][s.period_type] = s
 
     out: list[dict] = []
     for fy_end, pmap in fy_map.items():
         ordered = sorted(pmap.values(), key=lambda s: _PERIOD_ORDER[s.period_type])
         prev_cum = 0.0  # 期首=0からの累計
         for s in ordered:
-            cum = getattr(s, field)
-            if cum is None or prev_cum is None:
-                single = None
-            else:
-                single = cum - prev_cum
+            cum = getattr(s, field)  # null除外済み
             out.append({
                 "fy_end": fy_end,
                 "period_type": s.period_type,
-                "value": single,
+                "value": cum - prev_cum,
                 "period_end": s.period_end,
                 "disclosed": s.disclosed,
             })
-            if cum is not None:
-                prev_cum = cum
+            prev_cum = cum
     out.sort(key=lambda d: (d["period_end"] or d["disclosed"] or ""))
     return out
 
@@ -173,13 +185,18 @@ def _quarterly_yoy(series: list[dict], back: int = 0) -> float | None:
 # ---------------------------------------------------------------------------
 
 def annual_fy(stmts: list[Stmt]) -> list[Stmt]:
-    fy = [s for s in stmts if s.period_type in ("FY", "4Q", "Annual")]
-    fy.sort(key=lambda s: (s.fy_end or s.period_end or s.disclosed or ""))
-    return fy
+    # 実績EPSのある通期のみ。同一年度は最新開示を採用（予想修正の空行を除外）。
+    best: dict[str, Stmt] = {}
+    for s in stmts:
+        if s.period_type in ("FY", "4Q", "Annual") and _num(s.eps) and s.fy_end:
+            cur = best.get(s.fy_end)
+            if cur is None or (s.disclosed or "") >= (cur.disclosed or ""):
+                best[s.fy_end] = s
+    return sorted(best.values(), key=lambda s: s.fy_end)
 
 
 def cagr(latest: float | None, base: float | None, years: int) -> float | None:
-    if latest is None or base is None or latest <= 0 or base <= 0 or years <= 0:
+    if not _num(latest) or not _num(base) or latest <= 0 or base <= 0 or years <= 0:
         return None
     return ((latest / base) ** (1.0 / years) - 1.0) * 100.0
 
@@ -252,14 +269,16 @@ def compute_stock_metrics(stmts: list[Stmt], close: np.ndarray, volume: np.ndarr
     fy = annual_fy(stmts)
     annual_eps_yoy = yoy(fy[-1].eps, fy[-2].eps) if len(fy) >= 2 else None
     cagr_2y = cagr(fy[-1].eps, fy[-3].eps, 2) if len(fy) >= 3 else None
-    roe = (fy[-1].np / fy[-1].eq * 100.0) if (fy and fy[-1].np is not None
-                                              and fy[-1].eq not in (None, 0)) else None
+    roe = (fy[-1].np / fy[-1].eq * 100.0) if (fy and _num(fy[-1].np)
+                                              and _num(fy[-1].eq) and fy[-1].eq != 0) else None
 
-    latest = max(stmts, key=lambda s: (s.disclosed or s.period_end or "")) if stmts else None
-    equity_ratio = (latest.eq / latest.ta * 100.0) if (latest and latest.eq is not None
-                                                       and latest.ta not in (None, 0)) else None
+    # 自己資本比率は、貸借対照表が実際に入っている最新の行から（予想修正の空行を避ける）
+    bs = [s for s in stmts if _num(s.eq) and _num(s.ta) and s.eq != 0 and s.ta != 0]
+    latest_bs = max(bs, key=lambda s: (s.disclosed or s.period_end or "")) if bs else None
+    equity_ratio = (latest_bs.eq / latest_bs.ta * 100.0) if latest_bs else None
     shares_net = next((s.shares_net for s in sorted(
-        stmts, key=lambda s: (s.disclosed or ""), reverse=True) if s.shares_net), None)
+        stmts, key=lambda s: (s.disclosed or ""), reverse=True)
+        if _num(s.shares_net) and s.shares_net > 0), None)
 
     feats = price_features(close, volume)  # 履歴不足なら {} を返す
     last_close = feats.get("last_close")
@@ -315,13 +334,10 @@ def finalize(df: pd.DataFrame, cfg: dict | None = None) -> pd.DataFrame:
         & (df["rs_rating"].fillna(0).astype(float) >= cfg["th_rs"])
     )
 
-    # SCORE: 生存集合内での成長率パーセンタイルを重み付け（×100）
-    surv = df[df["pass"]]
+    # SCORE: 全銘柄内での成長率パーセンタイルを重み付け（×100）。
+    # 生存集合だけだとスコアが圧縮されて低く見えるため、母集団は全銘柄にする。
     for col in ("q0_eps_yoy", "q1_eps_yoy", "cagr_2y"):
-        pcol = f"_p_{col}"
-        df[pcol] = np.nan
-        if len(surv):
-            df.loc[surv.index, pcol] = surv[col].rank(pct=True)
+        df[f"_p_{col}"] = df[col].rank(pct=True)
     df["score"] = (
         cfg["w_q0"] * df["_p_q0_eps_yoy"].fillna(0)
         + cfg["w_q1"] * df["_p_q1_eps_yoy"].fillna(0)

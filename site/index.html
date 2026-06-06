@@ -221,8 +221,9 @@ function renderRanking() {
   const ok = r => r.q0_eps_yoy>=c.th_q0_eps && r.q1_eps_yoy>=c.th_q1_eps &&
                   r.q0_sales_yoy>=c.th_q0_sales && r.annual_eps_yoy>=c.th_annual_eps &&
                   r.roe>=c.th_roe && r.rs_rating>=c.th_rs;
+  // スコアの母集団は全銘柄（生存集合だけだと圧縮されて低く見えるため）
+  const pQ0=pctMap(METRICS,'q0_eps_yoy'), pQ1=pctMap(METRICS,'q1_eps_yoy'), p2Y=pctMap(METRICS,'cagr_2y');
   const surv = METRICS.filter(r => ok(r));
-  const pQ0=pctMap(surv,'q0_eps_yoy'), pQ1=pctMap(surv,'q1_eps_yoy'), p2Y=pctMap(surv,'cagr_2y');
   surv.forEach(r => r._score = 100*(c.w_q0*pQ0(r.q0_eps_yoy)+c.w_q1*pQ1(r.q1_eps_yoy)+c.w_2y*p2Y(r.cagr_2y)));
   surv.sort((a,b)=> b._score - a._score);
   const top = surv.slice(0, c.topn);

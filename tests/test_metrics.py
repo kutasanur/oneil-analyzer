@@ -76,6 +76,53 @@ def test_quarterly_yoy_none_when_prior_nonpositive():
 
 # ---- 通期 ----
 
+def test_single_quarter_ignores_null_forecast_fy():
+    # 業績予想の修正でFYのEPSがNoneの行が混じっても、最新の実績四半期(3Q)がQ0になる
+    stmts = [
+        mk("1Q", "2026-03-31", "2025-06-30", eps=24.84),
+        mk("2Q", "2026-03-31", "2025-09-30", eps=55.87),
+        mk("3Q", "2026-03-31", "2025-12-31", eps=91.83),
+        mk("FY", "2026-03-31", "2026-03-31", eps=None, disclosed="2026-05-15"),  # 予想/空
+        mk("1Q", "2025-03-31", "2024-06-30", eps=10.0),
+        mk("2Q", "2025-03-31", "2024-09-30", eps=22.0),
+        mk("3Q", "2025-03-31", "2024-12-31", eps=36.0),  # 3Q単=14
+    ]
+    s = single_quarter_series(stmts, "eps")
+    assert abs(s[-1]["value"] - 35.96) < 1e-6     # 最新単四半期=3Q2026単=91.83-55.87
+    assert _quarterly_yoy(s, 0) is not None and _quarterly_yoy(s, 0) > 100  # 35.96 vs 14
+
+
+def test_annual_fy_skips_null_and_dedupes_revision():
+    stmts = [
+        mk("FY", "2026-03-31", "2026-03-31", eps=None, disclosed="2025-10-23"),   # 予想空行
+        mk("FY", "2025-03-31", "2025-03-31", eps=145.95, disclosed="2025-04-24"),
+        mk("FY", "2025-03-31", "2025-03-31", eps=143.06, disclosed="2025-09-26"),  # 修正(最新)
+        mk("FY", "2024-03-31", "2024-03-31", eps=120.0, disclosed="2024-04-20"),
+    ]
+    fy = annual_fy(stmts)
+    assert [s.fy_end for s in fy] == ["2024-03-31", "2025-03-31"]   # null年度は除外
+    assert fy[-1].eps == 143.06                                     # 最新開示の修正値
+
+
+def test_nan_actuals_treated_as_missing():
+    # pandas経由でDBを読むと NULL は NaN(float) になる。NaNの実績行(予想修正)も確実に除外する。
+    nan = float("nan")
+    assert yoy(nan, 100) is None
+    assert yoy(100, nan) is None
+    assert cagr(nan, 100, 2) is None
+    stmts = [
+        mk("1Q", "2026-03-31", "2025-06-30", eps=24.84),
+        mk("2Q", "2026-03-31", "2025-09-30", eps=55.87),
+        mk("3Q", "2026-03-31", "2025-12-31", eps=91.83),
+        mk("FY", "2026-03-31", "2026-03-31", eps=nan, disclosed="2026-05-15"),  # NaNの予想行
+    ]
+    s = single_quarter_series(stmts, "eps")
+    assert s[-1]["period_type"] == "3Q" and abs(s[-1]["value"] - 35.96) < 1e-6
+    fy = annual_fy([mk("FY", "2026-03-31", "2026-03-31", eps=nan, disclosed="2026-05-15"),
+                    mk("FY", "2025-03-31", "2025-03-31", eps=86.0, disclosed="2025-05-14")])
+    assert [f.fy_end for f in fy] == ["2025-03-31"]
+
+
 def test_annual_eps_yoy_and_cagr():
     assert round(yoy(150, 100), 1) == 50.0
     assert yoy(150, 0) is None          # 前年0以下→None
