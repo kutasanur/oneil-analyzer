@@ -56,7 +56,7 @@ jobs:
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
         run: |
-          ARGS="--gzip"
+          ARGS=""
           if [ -n "${{ github.event.inputs.max_codes }}" ]; then
             ARGS="$ARGS --max-codes ${{ github.event.inputs.max_codes }}"
           fi
@@ -75,6 +75,9 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: python batch/notify.py
+
+      - name: DBをgzip圧縮（通知後のmetaを反映してから保存・配信）
+        run: gzip -kf batch/oneil.db
 
       - name: DBを data ブランチへ保存（単一コミットで履歴肥大化なし）
         env:
