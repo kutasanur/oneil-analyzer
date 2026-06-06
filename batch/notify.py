@@ -74,11 +74,16 @@ def run(db_path: Path = DB_PATH):
         info = {r[0]: r for r in rows}
         lines = ["| コード | 企業名 | SCORE | Q0 EPS% | Q1 EPS% | 2Y CAGR% | ROE% | RS |",
                  "|---|---|---|---|---|---|---|---|"]
+        def g(v):  # None/NaN安全な整数表示（cagr_2y等はpass銘柄でもNoneになり得る）
+            try:
+                return "-" if v is None else f"{float(v):.0f}"
+            except (TypeError, ValueError):
+                return "-"
         for c in fresh:
             r = info[c]
             link = f"[{c}]({pages}/index.html?code={c})" if pages else c
-            lines.append(f"| {link} | {r[1] or ''} | {r[2]:.0f} | {r[3]:.0f} | {r[4]:.0f} "
-                         f"| {r[5]:.0f} | {r[6]:.0f} | {r[7]} |")
+            lines.append(f"| {link} | {r[1] or ''} | {g(r[2])} | {g(r[3])} | {g(r[4])} "
+                         f"| {g(r[5])} | {g(r[6])} | {g(r[7])} |")
         body = (f"基準日 **{asof}**：オニール条件を新たに満たした銘柄が {len(fresh)} 件あります。\n\n"
                 + "\n".join(lines)
                 + (f"\n\nランキング全体: {pages}/index.html" if pages else ""))
